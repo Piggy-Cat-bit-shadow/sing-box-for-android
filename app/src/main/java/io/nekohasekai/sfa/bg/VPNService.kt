@@ -170,7 +170,7 @@ class VPNService :
             if (systemProxyEnabled) {
                 builder.setHttpProxy(
                     ProxyInfo.buildDirectProxy(
-                        options.httpProxyServer,
+                        options.httpProxyServer.value,
                         options.httpProxyServerPort,
                         options.httpProxyBypassDomain.toList(),
                     ),

@@ -21,6 +21,7 @@ import io.nekohasekai.libbox.NetworkInterfaceIterator
 import io.nekohasekai.libbox.PlatformInterface
 import io.nekohasekai.libbox.PlatformUser
 import io.nekohasekai.libbox.ShellSession
+import io.nekohasekai.libbox.StringBox
 import io.nekohasekai.libbox.StringIterator
 import io.nekohasekai.libbox.TunOptions
 import io.nekohasekai.libbox.WIFIState
@@ -335,7 +336,12 @@ interface PlatformInterfaceWrapper : PlatformInterface {
     ) : BridgeSession {
         override fun fileDescriptor(): Int = session.fileDescriptor.detachFd()
 
-        override fun name(): String = session.name
+        // BridgeSession.Name returns *StringBox on the Go side (the box keeps the Go pointer
+        // out of gomobile's packed result frame), so the platform's implementation of that
+        // interface has to hand back a StringBox too. The AIDL session field is still a plain
+        // String, so it is wrapped here rather than changing the AIDL contract, which the
+        // root service also implements.
+        override fun name(): StringBox = StringBox().apply { value = session.name }
 
         override fun inet6Active(): Boolean = session.isInet6Active
 
