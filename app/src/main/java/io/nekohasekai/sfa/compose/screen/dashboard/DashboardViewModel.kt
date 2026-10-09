@@ -219,7 +219,7 @@ class DashboardViewModel :
                         val note = notes.next()
                         notesList.add(
                             DashboardUiState.DeprecatedNote(
-                                message = note.message(),
+                                message = note.message().value,
                                 migrationLink = note.migrationLink,
                             ),
                         )

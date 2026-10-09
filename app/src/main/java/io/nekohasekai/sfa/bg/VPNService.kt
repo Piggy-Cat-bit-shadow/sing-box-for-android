@@ -74,13 +74,13 @@ class VPNService :
         val inet4Address = options.inet4Address
         while (inet4Address.hasNext()) {
             val address = inet4Address.next()
-            builder.addAddress(address.address(), address.prefix())
+            builder.addAddress(address.address().value, address.prefix())
         }
 
         val inet6Address = options.inet6Address
         while (inet6Address.hasNext()) {
             val address = inet6Address.next()
-            builder.addAddress(address.address(), address.prefix())
+            builder.addAddress(address.address().value, address.prefix())
         }
 
         if (options.autoRoute) {
@@ -124,7 +124,7 @@ class VPNService :
                 if (inet4RouteAddress.hasNext()) {
                     while (inet4RouteAddress.hasNext()) {
                         val address = inet4RouteAddress.next()
-                        builder.addRoute(address.address(), address.prefix())
+                        builder.addRoute(address.address().value, address.prefix())
                     }
                 }
 
@@ -132,7 +132,7 @@ class VPNService :
                 if (inet6RouteAddress.hasNext()) {
                     while (inet6RouteAddress.hasNext()) {
                         val address = inet6RouteAddress.next()
-                        builder.addRoute(address.address(), address.prefix())
+                        builder.addRoute(address.address().value, address.prefix())
                     }
                 }
             }

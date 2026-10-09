@@ -252,7 +252,7 @@ class RootServer : RootService() {
 
         override fun getFileDescriptor(): ParcelFileDescriptor = ParcelFileDescriptor.fromFd(session.fileDescriptor())
 
-        override fun getName(): String = session.name()
+        override fun getName(): String = session.name().value
 
         override fun isInet6Active(): Boolean = session.inet6Active()
 
