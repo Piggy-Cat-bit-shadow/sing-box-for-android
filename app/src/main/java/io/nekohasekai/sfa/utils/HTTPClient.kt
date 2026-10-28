@@ -7,6 +7,9 @@ import java.util.Locale
 
 class HTTPClient : Closeable {
     companion object {
+        /** The User-Agent subscription body requests send on first import and every refresh. */
+        const val SUBSCRIPTION_USER_AGENT = "sing-box/1.15.0"
+
         val userAgent by lazy {
             var userAgent = "SFA (sing-box "
             userAgent += Libbox.version()
@@ -23,7 +26,7 @@ class HTTPClient : Closeable {
         client.modernTLS()
     }
 
-    fun getString(url: String): String {
+    fun getString(url: String, userAgent: String = HTTPClient.userAgent): String {
         val request = client.newRequest()
         request.setUserAgent(userAgent)
         request.setURL(url)

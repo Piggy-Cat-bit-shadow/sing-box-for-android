@@ -75,7 +75,7 @@ class UpdateProfileWork {
                     continue
                 }
                 try {
-                    val content = HTTPClient().use { it.getString(profile.typed.remoteURL) }
+                    val content = HTTPClient().use { it.getString(profile.typed.remoteURL, HTTPClient.SUBSCRIPTION_USER_AGENT) }
                     Libbox.checkConfig(content)
                     val file = File(profile.typed.path)
                     if (file.readText() != content) {

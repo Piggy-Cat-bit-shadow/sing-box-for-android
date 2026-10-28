@@ -259,7 +259,7 @@ class NewProfileViewModel(application: Application) : AndroidViewModel(applicati
                                     File(Uri.parse(sourceURL).path!!).readText()
                                 }
                                 sourceURL.startsWith("http://") || sourceURL.startsWith("https://") -> {
-                                    HTTPClient().use { it.getString(sourceURL) }
+                                    HTTPClient().use { it.getString(sourceURL, HTTPClient.SUBSCRIPTION_USER_AGENT) }
                                 }
                                 else -> throw Exception("Unsupported source: $sourceURL")
                             }
@@ -300,7 +300,7 @@ class NewProfileViewModel(application: Application) : AndroidViewModel(applicati
         typedProfile.path = configFile.path
 
         // Fetch initial config - this MUST succeed for remote profiles
-        val content = HTTPClient().use { it.getString(state.remoteUrl) }
+        val content = HTTPClient().use { it.getString(state.remoteUrl, HTTPClient.SUBSCRIPTION_USER_AGENT) }
         Libbox.checkConfig(content)
         val configContent = content
 

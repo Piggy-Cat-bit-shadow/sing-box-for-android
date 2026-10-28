@@ -354,7 +354,7 @@ class DashboardViewModel :
 
             try {
                 // Fetch remote config
-                val content = HTTPClient().use { it.getString(profile.typed.remoteURL) }
+                val content = HTTPClient().use { it.getString(profile.typed.remoteURL, HTTPClient.SUBSCRIPTION_USER_AGENT) }
                 Libbox.checkConfig(content)
 
                 // Check if content changed
