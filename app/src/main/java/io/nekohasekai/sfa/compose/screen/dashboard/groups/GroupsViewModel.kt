@@ -8,10 +8,12 @@ import io.nekohasekai.sfa.compose.model.Group
 import io.nekohasekai.sfa.compose.model.GroupItem
 import io.nekohasekai.sfa.compose.model.toList
 import io.nekohasekai.sfa.constant.Status
+import io.nekohasekai.sfa.ktx.unwrap
 import io.nekohasekai.sfa.utils.AppLifecycleObserver
 import io.nekohasekai.sfa.utils.CommandClient
 import io.nekohasekai.sfa.utils.CommandTarget
 import io.nekohasekai.sfa.utils.RemoteControlManager
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +21,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 data class GroupsUiState(
     val groups: List<Group> = emptyList(),
@@ -32,6 +36,26 @@ sealed class GroupsEvent : ScreenEvent {
     data class GroupSelected(val groupTag: String, val itemTag: String) : GroupsEvent()
 }
 
+/**
+ * The kernel's read-back for one selection, decoded from the JSON document
+ * `CommandClient.SelectOutboundWithRequest` returns.
+ *
+ * A tag is not an attempt: two taps on one group share the group tag, so a late answer for the
+ * first could settle the second. `requestId` names the attempt, `appliedOutboundTag` is what the
+ * group actually holds afterwards (not what was asked for) and `appliedRevision` is the state the
+ * next attempt must be judged against. `supported == false` is a capability answer from a core
+ * that predates the identity fields - the selection was performed, but nobody can confirm it.
+ */
+@Serializable
+private data class SelectOutboundReadBack(
+    val supported: Boolean = false,
+    val unconfirmed: Boolean = false,
+    val requestId: Long = 0,
+    val appliedOutboundTag: String? = null,
+    val appliedRevision: Long = 0,
+    val stale: Boolean = false,
+)
+
 class GroupsViewModel(private val sharedCommandClient: CommandClient? = null) :
     BaseViewModel<GroupsUiState, GroupsEvent>(),
     CommandClient.Handler {
@@ -41,6 +65,14 @@ class GroupsViewModel(private val sharedCommandClient: CommandClient? = null) :
     private val _serviceStatus = MutableStateFlow(Status.Stopped)
     val serviceStatus = _serviceStatus.asStateFlow()
     private var lastServiceStatus: Status = Status.Stopped
+
+    /** The latest selection attempt per group, keyed by the request identity the kernel echoes. */
+    private data class PendingSelection(val requestId: Long, val tag: String)
+
+    private val selectionRequestCounter = AtomicLong(0)
+    private val pendingSelections = mutableMapOf<String, PendingSelection>()
+    private val appliedRevisions = mutableMapOf<String, Long>()
+    private val selectionJson = Json { ignoreUnknownKeys = true }
 
     init {
         if (sharedCommandClient != null) {
@@ -173,32 +205,78 @@ class GroupsViewModel(private val sharedCommandClient: CommandClient? = null) :
             return
         }
 
+        val requestId = selectionRequestCounter.incrementAndGet()
+        val expectedRevision = appliedRevisions[groupTag] ?: 0L
+        pendingSelections[groupTag] = PendingSelection(requestId, itemTag)
+        // Optimistic, but only while the attempt is in flight: `settleSelection` removes the
+        // pending entry, and `updateGroups` stops overlaying the moment it is gone.
+        updateState {
+            copy(
+                groups =
+                groups.map { group ->
+                    if (group.tag == groupTag) group.copy(selected = itemTag) else group
+                },
+            )
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Select the new outbound immediately
-                CommandTarget.standaloneClient().selectOutbound(groupTag, itemTag)
-
-                // Update local state and show snackbar
+                val document =
+                    CommandTarget.standaloneClient()
+                        .selectOutboundWithRequest(groupTag, itemTag, requestId, expectedRevision)
+                        .unwrap
+                val readBack =
+                    runCatching {
+                        selectionJson.decodeFromString<SelectOutboundReadBack>(document)
+                    }.getOrNull()
                 withContext(Dispatchers.Main) {
-                    updateState {
-                        copy(
-                            groups =
-                            groups.map { group ->
-                                if (group.tag == groupTag) {
-                                    group.copy(selected = itemTag)
-                                } else {
-                                    group
-                                }
-                            },
-                            showCloseConnectionsSnackbar = true,
-                        )
-                    }
-                    sendEvent(GroupsEvent.GroupSelected(groupTag, itemTag))
+                    settleSelection(groupTag, requestId, itemTag, readBack)
                 }
             } catch (e: Exception) {
-                sendError(e)
+                withContext(Dispatchers.Main) {
+                    if (pendingSelections[groupTag]?.requestId == requestId) {
+                        pendingSelections.remove(groupTag)
+                    }
+                    sendError(e)
+                }
             }
         }
+    }
+
+    /**
+     * Applies the kernel's read-back for one attempt, if it still owns the row.
+     *
+     * The row follows `appliedOutboundTag` - what the group HOLDS - not what was requested: a hard
+     * switch or a refusing group can end somewhere else. A late answer for a replaced attempt, and
+     * an answer from a core that cannot confirm identity, change nothing.
+     */
+    private fun settleSelection(
+        groupTag: String,
+        requestId: Long,
+        requestedTag: String,
+        readBack: SelectOutboundReadBack?,
+    ) {
+        if (pendingSelections[groupTag]?.requestId != requestId) {
+            return
+        }
+        pendingSelections.remove(groupTag)
+        if (readBack == null || !readBack.supported || readBack.unconfirmed) {
+            // Capability answer: the selection was sent, but this core cannot say which attempt it
+            // was. The groups stream is the authority; no revision is invented here.
+            return
+        }
+        val appliedTag = readBack.appliedOutboundTag ?: requestedTag
+        appliedRevisions[groupTag] = readBack.appliedRevision
+        updateState {
+            copy(
+                groups =
+                groups.map { group ->
+                    if (group.tag == groupTag) group.copy(selected = appliedTag) else group
+                },
+                showCloseConnectionsSnackbar = true,
+            )
+        }
+        sendEvent(GroupsEvent.GroupSelected(groupTag, appliedTag))
     }
 
     fun closeConnections() {
@@ -277,14 +355,24 @@ class GroupsViewModel(private val sharedCommandClient: CommandClient? = null) :
             }
 
             withContext(Dispatchers.Main) {
+                val pending = pendingSelections.toMap()
                 updateState {
                     val initialExpandedGroups = if (expandedGroups.isEmpty() && currentGroups.isEmpty()) {
                         mergedGroups.filter { it.isExpand }.map { it.tag }.toSet()
                     } else {
                         expandedGroups
                     }
+                    // The stream can arrive before the read-back and show the pre-selection
+                    // member. Overlay only the attempts that are still in flight - a settled or
+                    // failed attempt has no entry, so the stream is free to correct the row.
+                    val withPending =
+                        mergedGroups.map { group ->
+                            pending[group.tag]?.let { selection ->
+                                group.copy(selected = selection.tag)
+                            } ?: group
+                        }
                     copy(
-                        groups = if (mergedGroups == groups) groups else mergedGroups,
+                        groups = if (withPending == groups) groups else withPending,
                         expandedGroups = initialExpandedGroups,
                         isLoading = false,
                     )

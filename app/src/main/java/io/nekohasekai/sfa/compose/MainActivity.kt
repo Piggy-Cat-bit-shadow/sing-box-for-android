@@ -148,6 +148,7 @@ import io.nekohasekai.sfa.database.Settings
 import io.nekohasekai.sfa.ktx.hasPermission
 import io.nekohasekai.sfa.ktx.launchCustomTab
 import io.nekohasekai.sfa.update.UpdateState
+import io.nekohasekai.sfa.utils.ReloadIdentity
 import io.nekohasekai.sfa.utils.RemoteControlManager
 import io.nekohasekai.sfa.vendor.Vendor
 import kotlinx.coroutines.Dispatchers
@@ -466,7 +467,11 @@ class MainActivity :
                                 when (modeToShow) {
                                     UiEvent.ApplyServiceChange.Mode.Reload -> {
                                         withContext(Dispatchers.IO) {
-                                            Libbox.newStandaloneCommandClient().serviceReload()
+                                            // The reload carries its own request identity and reads
+                                            // back the instance the kernel left running. An old
+                                            // core still reloads; the answer then says it cannot
+                                            // confirm which attempt it was.
+                                            ReloadIdentity.reload()
                                         }
                                     }
 
